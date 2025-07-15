@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Banco de Memoria de Aledo</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    html, body { margin:0; padding:0; height:100%; overflow-x:hidden; font-family:sans-serif; }
+    /* Header fijo con botón sobre proyecto */
+    header#masthead {
+      position:fixed; top:0; left:0; right:0; height:80px;
+      background:#2A2E2F; display:flex; align-items:center;
+      justify-content:space-between; padding:0 20px; color:#fff; z-index:2000;
+    }
+    .site-title { font-size:18px; text-transform:uppercase; letter-spacing:1px; margin:0; }
+    #about-btn {
+      background:none; border:none; color:#fff; font-size:14px;
+      cursor:pointer; padding:6px 12px; border-radius:4px;
+    }
+    #about-btn:hover { background:rgba(255,255,255,0.1); }
+    /* Mapa debajo del header */
+    #map { position:absolute; top:60px; bottom:0; left:0; right:0; z-index:1; }
+    /* Leyenda */
+    #legend { position:absolute; top:100px; left:20px; width:280px;
+      background:#fff; border:1px solid #ddd; border-radius:4px;
+      padding:10px; font-size:26px; z-index:1500;
+    }
+    #legend h2 { margin:0 0 8px; font-size:14px; text-transform:uppercase; }
+    .legend-item { display:flex; align-items:center; cursor:pointer; margin:4px 0; }
+    .legend-color { width:12px; height:12px; margin-right:6px; }
+    .green { background:green; }
+    .pink  { background:hotpink; }
+    .blue  { background:blue; }
+    .legend-item.selected { font-weight:bold; }
+    /* Tooltip sobre punto más cerca */
+    #hover-tooltip {
+      position:absolute; background:rgba(255, 255, 255, 0.7); color:#000000;
+      padding:4px 8px; border-radius:4px; font-size:16px;
+      pointer-events:none; opacity:0; transition:opacity 0.1s;
+      transform:translate(-50%, -20%); z-index:2001;
+    }
+    /* Panel lateral superpuesto */
+    #info-panel { position:fixed; top:0; right:0; width:350px; height:100%; background:#fff;
+      padding:20px; overflow-y:auto; transform:translateX(100%);
+      transition:transform 0.8s cubic-bezier(0.25,0.8,0.25,1);
+      box-shadow:-2px 0 6px rgba(0,0,0,0.2); z-index:2000;
+    }
+    #info-panel.active { transform:translateX(0); }
+    #info-panel .close-btn { position:absolute; top:10px; right:14px; font-size:18px; cursor:pointer; }
+    #info-panel h3 { margin-top:0; font-size:20px; }
+    #info-panel iframe { width:100%; height:200px; border:none; margin-bottom:12px; }
+    #info-panel p { font-size:14px; margin:6px 0; }
+    #info-panel a { color:#0066cc; text-decoration:underline; }
+  </style>
+</head>
+<body>
+  <header id="masthead">
+    <p class="site-title">Banco de Memoria de Aledo</p>
+    <button id="about-btn">Sobre el proyecto</button>
+  </header>
+  <div id="map"></div>
+  <div id="legend">
+    <h2>Filtros</h2>
+    <div class="legend-item selected" data-type="interviews"><span class="legend-color green"></span>Entrevistas</div>
+    <div class="legend-item selected" data-type="heritage"><span class="legend-color pink"></span>Patrimonio</div>
+    <div class="legend-item selected" data-type="culture"><span class="legend-color blue"></span>Iniciativas culturales</div>
+  </div>
+  <div id="hover-tooltip"></div>
+  <div id="info-panel">
+    <span class="close-btn">&times;</span>
+    <div id="panel-content"></div>
+  </div>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    var map = L.map('map',{zoomControl:false}).setView([37.79456,-1.57295],17);
+    L.control.zoom({position:'bottomleft'}).addTo(map);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:''}).addTo(map);
+    var icons={interviews:L.divIcon({className:'legend-color green',iconSize:[12,12]}),heritage:L.divIcon({className:'legend-color pink',iconSize:[12,12]}),culture:L.divIcon({className:'legend-color blue',iconSize:[12,12]})};
+    var interviews=[
+      {type:'interviews',name:'Manuel Pérez',nickname:'El molinero',age:'86 años',profession:'Molinero',date:'10 mayo 2023',embed:'https://www.youtube.com/embed/dQw4w9WgXcQ',desc:'Manuel relata las técnicas tradicionales de molienda, el uso del agua en los molinos y los cambios en la agricultura local.',coords:[37.792802,-1.572760]},
+      {type:'interviews',name:'Carmen Ruiz',nickname:'La panadera',age:'79 años',profession:'Panadera',date:'15 junio 2023',embed:'https://www.youtube.com/embed/VIDEOID2',desc:'Carmen comparte recetas de pan tradicional, fiestas patronales y la evolución de la panadería en Aledo.',coords:[37.793409,-1.573468]},
+      {type:'interviews',name:'José Martínez',nickname:'El pastor',age:'83 años',profession:'Pastor',date:'01 julio 2023',embed:'https://www.youtube.com/embed/VIDEOID3',desc:'José habla sobre la trashumancia, el pastoreo de ovejas y los usos comunales de la tierra.',coords:[37.794470,-1.572613]}
+    ];
+    var heritage=[
+      {type:'heritage',name:'La Picota',coords:[37.7925,-1.5730],chronology:'1592',photo:'https://regiondemurciafilm.com/localizacion/picota-de-aledo/',desc:'Construida a finales del siglo XVI como picota medieval, símbolo de la justicia local.',link:'https://www.aledo.es/picota.html'},
+      {type:'heritage',name:'Muralla de Aledo',coords:[37.7933,-1.5735],chronology:'siglo XIII',photo:'https://upload.wikimedia.org/wikipedia/commons/Archivo:Muralla_de_Aledo.jpg',desc:'Recinto amurallado construido en tapial con varias torres vigía que defendían la villa.',link:'https://www.aledo.es/muralla.html'},
+      {type:'heritage',name:'Castillo de la Calahorra',coords:[37.791497,-1.573296],chronology:'siglo X',photo:'https://es.wikipedia.org/wiki/Castillo_de_Aledo#/media/Archivo:Castillo_de_Aledo.jpg',desc:'Fortaleza andalusí reconstruida por la Orden de Santiago, con la torre del homenaje llamada Calahorra.',link:'https://es.wikipedia.org/wiki/Castillo_de_Aledo'},
+      {type:'heritage',name:'Iglesia de Santa María la Real',coords:[37.7920,-1.5732],chronology:'1761-1804',photo:'http://www.regmurcia.com/servlet/s.Sl?sit=a,68,c,522,m,1075&r=CeAP-459-PORTADA_CENTRO_AMPLIADO',desc:'Templo barroco-neoclásico construido tras la conversión de la antigua mezquita en iglesia.',link:'http://www.regmurcia.com/servlet/s.Sl?sit=a,68,c,522,m,1075&r=CeAP-459-PORTADA_CENTRO_AMPLIADO'}
+    ];
+    var culture=[
+      {type:'culture',name:'SonARTE Aledo',coords:[37.791476,-1.573469],embed:'https://www.youtube.com/embed/Ax7_T1-U598',organizer:'Ayuntamiento de Aledo, Asociación de Jóvenes de Aledo, Alumnos del Campus Rural',desc:'Festival anual de jóvenes talentos musicales que promueve la música local en espacios históricos de Aledo.',link:'https://www.youtube.com/watch?v=Ax7_T1-U598'}
+    ];
+    var allMarkers={interviews:[],heritage:[],culture:[]};
+    var tooltip=document.getElementById('hover-tooltip'),panel=document.getElementById('info-panel'),content=document.getElementById('panel-content');
+    function closePanel(){panel.classList.remove('active')} map.on('click',closePanel);
+    function addEvents(m){m.on('mouseover',e=>{var p=map.latLngToContainerPoint(e.latlng);tooltip.textContent=m.data.name;tooltip.style.left=p.x+'px';tooltip.style.top=p.y+'px';tooltip.style.opacity=1});m.on('mouseout',()=>tooltip.style.opacity=0);m.on('click',e=>{L.DomEvent.stopPropagation(e);var d=m.data,html='<h3>'+d.name+'</h3>';if(d.type==='interviews'){html+='<iframe src="'+d.embed+'" allowfullscreen></iframe><p><strong>Nombre:</strong> '+d.name+' "'+d.nickname+'"</p><p><strong>Edad:</strong> '+d.age+'</p><p><strong>Profesión:</strong> '+d.profession+'</p><p><strong>Descripción:</strong> '+d.desc+'</p><p><strong>Fecha:</strong> '+d.date+'</p>'}else if(d.type==='heritage'){html+='<img src="'+d.photo+'" alt="'+d.name+'" style="width:100%;margin-bottom:12px;"><p><strong>Cronología:</strong> '+d.chronology+'</p><p><strong>Descripción:</strong> '+d.desc+'</p><p><a href="'+d.link+'" target="_blank">Más info</a></p>'}else{html+='<iframe src="'+d.embed+'" allowfullscreen></iframe><p><strong>Organizador:</strong> '+d.organizer+'</p><p>'+d.desc+'</p><p><a href="'+d.link+'" target="_blank">Ver más</a></p>'}content.innerHTML=html;panel.classList.add('active')})}
+    interviews.forEach(function(d){var m=L.marker(d.coords,{icon:icons.interviews}).addTo(map);m.data=d;allMarkers.interviews.push(m);addEvents(m)});
+    heritage.forEach(function(d){var m=L.marker(d.coords,{icon:icons.heritage}).addTo(map);m.data=d;allMarkers.heritage.push(m);addEvents(m)});
+    culture.forEach(function(d){var m=L.marker(d.coords,{icon:icons.culture}).addTo(map);m.data=d;allMarkers.culture.push(m);addEvents(m)});
+    document.querySelector('#info-panel .close-btn').addEventListener('click',closePanel);
+    function applyFilters(){['interviews','heritage','culture'].forEach(function(type){var show=document.querySelector('[data-type="'+type+'"]').classList.contains('selected');allMarkers[type].forEach(function(m){show?m.addTo(map):map.removeLayer(m)})})}
+    document.querySelectorAll('.legend-item').forEach(el=>el.addEventListener('click',function(){el.classList.toggle('selected');applyFilters()}));applyFilters();
+    // Botón Sobre el proyecto abre panel
+    document.getElementById('about-btn').addEventListener('click',function(e){e.stopPropagation();var html='<h3>Sobre el proyecto</h3><p>"Banco de Memoria de Aledo" es una iniciativa que preserva relatos orales de vecinos mayores de Aledo (Murcia) y los ubica geográficamente.</p>';content.innerHTML=html;panel.classList.add('active')});
+  </script>
+</body>
+</html>

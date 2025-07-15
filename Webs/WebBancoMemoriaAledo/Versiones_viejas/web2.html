@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Banco de Memoria de Aledo</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    html, body { margin:0; padding:0; height:100%; overflow-x:hidden; font-family:sans-serif; }
+
+    /* Header fijo con botón sobre proyecto */
+    header#masthead {
+      position:fixed; top:0; left:0; right:0; height:80px;
+      background:#2A2E2F; display:flex; align-items:center;
+      justify-content:space-between; padding:0 20px; color:#fff; z-index:2000;
+    }
+    .site-title { font-size:18px; text-transform:uppercase; letter-spacing:1px; margin:0;}
+    #about-btn {
+      background:none; border:none; color:#fff; font-size:14px;
+      cursor:pointer; padding:6px 12px; border-radius:4px;
+    }
+    #about-btn:hover { background:rgba(255,255,255,0.1); }
+
+    /* Mapa debajo del header */
+    #map { position:absolute; top:60px; bottom:0; left:0; right:0; z-index:1; }
+
+    /* Leyenda */
+    #legend {
+      position:absolute; top:100px; left:20px; width:280px;
+      background:#fff; border:1px solid #ddd; border-radius:4px;
+      padding:10px; font-size:28px; z-index:1500; /* +2pts */
+    }
+    #legend h2 { margin:0 0 8px; font-size:16px; text-transform:uppercase; } /* +2pts */
+    .legend-item { display:flex; align-items:center; cursor:pointer; margin:4px 0; font-size:18px; } /* +2pts */
+    .legend-color { width:12px; height:12px; margin-right:6px; }
+    .green { background:green; }
+    .pink  { background:hotpink; }
+    .blue  { background:blue; }
+    .legend-item.selected { font-weight:bold; }
+
+    /* Tooltip restilado */
+    #hover-tooltip {
+      position: absolute;
+      background: #fff;
+      color: #000;
+      padding: 6px 12px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 14px;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.1s;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      z-index: 2001;
+    }
+    #hover-tooltip::after {
+      content: '';
+      position: absolute;
+      bottom: -6px;
+      left: 50%;
+      transform: translateX(-50%);
+      border-width: 6px 6px 0 6px;
+      border-style: solid;
+      border-color: #fff transparent transparent transparent;
+    }
+
+    /* Panel lateral superpuesto */
+    #info-panel {
+      position:fixed; top:0; right:0; width:350px; height:100%; background:#fff;
+      padding:20px; overflow-y:auto; transform:translateX(100%);
+      transition:transform 0.8s cubic-bezier(0.25,0.8,0.25,1);
+      box-shadow:-2px 0 6px rgba(0,0,0,0.2); z-index:2000;
+    }
+    #info-panel.active { transform:translateX(0); }
+    #info-panel .close-btn {
+      position:absolute; top:10px; right:14px; font-size:20px; cursor:pointer; /* +2pts */
+    }
+    #info-panel h3 {
+      margin-top:0; font-size:24px; /* +2pts */
+    }
+    #info-panel iframe {
+      width:100%; height:200px; border:none; margin-bottom:12px;
+    }
+    #info-panel p {
+      font-size:16px; /* +2pts */
+      margin:6px 0;
+      line-height:1.4;
+    }
+    #info-panel a {
+      color:#0066cc; text-decoration:underline;
+      font-size:16px; /* +2pts */
+    }
+  </style>
+</head>
+<body>
+  <header id="masthead">
+    <p class="site-title">Banco de Memoria de Aledo</p>
+    <button id="about-btn">Sobre el proyecto</button>
+  </header>
+
+  <div id="map"></div>
+
+  <div id="legend">
+    <h2>Filtros</h2>
+    <div class="legend-item selected" data-type="interviews">
+      <span class="legend-color green"></span>Entrevistas
+    </div>
+    <div class="legend-item selected" data-type="heritage">
+      <span class="legend-color pink"></span>Patrimonio
+    </div>
+    <div class="legend-item selected" data-type="culture">
+      <span class="legend-color blue"></span>Iniciativas culturales
+    </div>
+  </div>
+
+  <div id="hover-tooltip"></div>
+
+  <div id="info-panel">
+    <span class="close-btn">&times;</span>
+    <div id="panel-content"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    var map = L.map('map',{zoomControl:false}).setView([37.79456,-1.57295],17);
+    L.control.zoom({position:'bottomleft'}).addTo(map);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',{
+      maxZoom:19, attribution:''
+    }).addTo(map);
+
+    var icons = {
+      interviews: L.divIcon({className:'legend-color green', iconSize:[12,12]}),
+      heritage:   L.divIcon({className:'legend-color pink',  iconSize:[12,12]}),
+      culture:    L.divIcon({className:'legend-color blue',  iconSize:[12,12]})
+    };
+
+    // Datos
+    var interviews = [
+      {
+        type:'interviews',
+        name:'Manuel Pérez',
+        nickname:'El molinero',
+        age:'86 años',
+        profession:'Molinero',
+        date:'10 mayo 2023',
+        embed:'https://www.youtube.com/embed/dQw4w9WgXcQ',
+        desc:
+          'Hijo de quinta generación de molineros del río Argos, Manuel recuerda cómo su abuelo fundó el molino en 1902 y describe las piedras de molino y la molienda a pie de río. '
+          +'Habla de las leyendas entre los moledores, la mecánica de las muelas y el mantenimiento de las compuertas. '
+          +'Relata cómo el molino era punto de encuentro de vecinos tras la guerra, los trueques de grano y el papel social del edificio. '
+          +'Detalla la restauración del edificio y su importancia en la economía local hasta los años 70.',
+        coords:[37.792802,-1.572760]
+      },
+      {
+        type:'interviews',
+        name:'Carmen Ruiz',
+        nickname:'La panadera',
+        age:'79 años',
+        profession:'Panadera',
+        date:'15 junio 2023',
+        embed:'https://www.youtube.com/embed/VIDEOID2',
+        desc:
+          'Desde niña acompañaba a su madre a la vieja panadería familiar, aprendiendo a amasar con levadura madre y horno de leña. '
+          +'Describe paso a paso la fermentación lenta, el amasado rústico y las técnicas de marcado de las hogazas. '
+          +'Recuerda fiestas patronales donde repartían pan bendecido y cómo cambió la compra de harina con la llegada del tren. '
+          +'Comenta la evolución del negocio hasta los hornos modernos y la apertura de su propia panadería en 1965.',
+        coords:[37.793409,-1.573468]
+      },
+      {
+        type:'interviews',
+        name:'José Martínez',
+        nickname:'El pastor',
+        age:'83 años',
+        profession:'Pastor',
+        date:'01 julio 2023',
+        embed:'https://www.youtube.com/embed/VIDEOID3',
+        desc:
+          'Pastor de ovejas merinas, José narra las rutas de trashumancia por las sierras de Espuña cada primavera y otoño. '
+          +'Relata las estaciones del pastoreo, el cuidado de los rebaños y el trueque con agricultores locales. '
+          +'Habla de la construcción de chozos, del uso del pasto comunal y de los cantos pastoriles que animaban las duras jornadas. '
+          +'Comparte recuerdos de las labores de esquileo y de cómo el pastoreo moldeó el paisaje de Aledo.',
+        coords:[37.794470,-1.572613]
+      }
+    ];
+
+    var heritage = [
+      {
+        type:'heritage',
+        name:'La Picota',
+        coords:[37.7925,-1.5730],
+        chronology:'1592',
+        photo:'https://regiondemurciafilm.com/localizacion/picota-de-aledo/',
+        desc:
+          'Esta columna de justicia, erigida en 1592 bajo el reinado de Felipe II, servía como símbolo del poder señorial y jurisdiccional de la villa. '
+          +'Describe las ceremonias de anuncio de penas, las hogueras rituales y los juicios públicos ante sus muros. '
+          +'Tipología de picota cilíndrica, su ubicación estratégica en la plaza mayor y su relación con la administración municipal. '
+          +'Menciona la restauración de 1978, los trabajos de consolidación y el uso de mampostería y sillares. '
+          +'Incluye relatos de castigos corporales y la leyenda de un ajusticiado que maldijo la torre antes de su ejecución.',
+        link:'https://www.aledo.es/picota.html'
+      },
+      {
+        type:'heritage',
+        name:'Muralla de Aledo',
+        coords:[37.7933,-1.5735],
+        chronology:'siglo XIII',
+        photo:'https://upload.wikimedia.org/wikipedia/commons/Archivo:Muralla_de_Aledo.jpg',
+        desc:
+          'Vestigio del recinto amurallado almohade y cristiano, con lienzos de tapial y torres prismáticas que defendían la entrada oeste. '
+          +'Se extiende unos 400 m y alcanza 6 m de altura en los tramos mejor conservados. '
+          +'Narra las técnicas constructivas con barro y piedra, y el empleo de mortero de cal en la fase medieval. '
+          +'Describe el camino de ronda, las saeteras y las reformas del siglo XIX para reforzar las defensas. '
+          +'Incluye episodios de asedios otomanos y enfrentamientos con bandas de forajidos en los siglos XVI–XVII.',
+        link:'https://www.aledo.es/muralla.html'
+      },
+      {
+        type:'heritage',
+        name:'Castillo de la Calahorra',
+        coords:[37.791497,-1.573296],
+        chronology:'siglo X',
+        photo:'https://es.wikipedia.org/wiki/Castillo_de_Aledo#/media/Archivo:Castillo_de_Aledo.jpg',
+        desc:
+          'Fortaleza andalusí del siglo X para controlar rutas del valle del Guadalentín, reconstruida por la Orden de Santiago tras la Reconquista. '
+          +'Conserva la torre del homenaje y restos de la cisterna original. '
+          +'Planta trapezoidal adaptada al terreno rocoso, muros de tapial reforzados con contrafuertes. '
+          +'Relatos de la batalla de 1244 y reformas renacentistas del XVI. '
+          +'Leyendas de túneles subterráneos y un tesoro escondido, recuperada parcialmente en los 90.',
+        link:'https://www.aledo.es/muralla.html'
+      },
+      {
+        type:'heritage',
+        name:'Iglesia de Santa María la Real',
+        coords:[37.7920,-1.5732],
+        chronology:'1761-1804',
+        photo:'http://www.regmurcia.com/servlet/s.Sl?sit=a,68,c,522,m,1075&r=CeAP-459-PORTADA_CENTRO_AMPLIADO',
+        desc:
+          'Erigida entre 1761 y 1804 sobre la antigua mezquita, esta iglesia barroco-neoclásica presenta nave central con cúpula y dos capillas laterales. '
+          +'Destacan la portada de sillería y las yeserías ornamentales del interior. '
+          +'El alminar musulmán adaptado como campanario y la sacristía neoclásica. '
+          +'Retablo mayor tallado en madera dorada e imágenes de santo Domingo de Guzmán y Santa Rita. '
+          +'Restauraciones de 1985 e intervenciones arqueológicas que hallaron restos visigodos. '
+          +'Hoy es un atractivo turístico y centro de actividades culturales y litúrgicas.',
+        link:'http://www.regmurcia.com/servlet/s.Sl?sit=a,68,c,522,m,1075&r=CeAP-459-PORTADA_CENTRO_AMPLIADO'
+      }
+    ];
+
+    var culture = [
+      {
+        type:'culture',
+        name:'SonARTE Aledo',
+        coords:[37.791476,-1.573469],
+        embed:'https://www.youtube.com/embed/Ax7_T1-U598',
+        organizer:'Ayuntamiento de Aledo, Asociación de Jóvenes de Aledo, Alumnos del Campus Rural',
+        desc:'Festival anual de jóvenes talentos musicales que promueve la música local en espacios históricos de Aledo.',
+        link:'https://www.instagram.com/sonarte.aledo/'
+      },
+      {
+        type:'culture',
+        name:'Noche en Vela',
+        coords:[37.792046,-1.572967],
+        embed:'',
+        organizer:'Asociación Sociocultural La Noche en Vela de Aledo',
+        desc:
+          'Cada año, en agosto las calles del casco antiguo de Aledo se iluminan solo con velas, mostrando su cara más medieval. '
+          +'Más de cinco mil personas visitaron la pasada edición, disfrutando de poesía, danza y narradores entre las velas. '
+          +'Se ha consolidado como un referente cultural de verano en la Región, transformando murallas y callejuelas en un museo al aire libre iluminado. '
+          +'Vecinos y visitantes experimentan un ambiente único de silencio y contemplación, con espectáculos en cada rincón.',
+        link:'https://www.aledo.es/noche_vela.html'  /* fuente: Ayuntamiento de Aledo :contentReference[oaicite:0]{index=0} */
+      }
+    ];
+
+    var allMarkers = {interviews:[], heritage:[], culture:[]};
+    var tooltip    = document.getElementById('hover-tooltip'),
+        panel      = document.getElementById('info-panel'),
+        content    = document.getElementById('panel-content');
+
+    function closePanel(){ panel.classList.remove('active'); }
+    map.on('click', closePanel);
+
+    function addEvents(m){
+      m.on('mouseover', e => {
+        var p = map.latLngToContainerPoint(e.latlng);
+        tooltip.textContent = m.data.name;
+        // Ajuste centrado y pequeñísimo espacio (8px incluyendo flecha)
+        var w = tooltip.offsetWidth,
+            h = tooltip.offsetHeight;
+        var rect = map.getContainer().getBoundingClientRect();
+        tooltip.style.left    = (rect.left + p.x - w/2) + 'px';
+        tooltip.style.top     = (rect.top  + p.y - h - 13) + 'px';
+        tooltip.style.opacity = 1;
+      });
+      m.on('mouseout', () => {
+        tooltip.style.opacity = 0;
+      });
+      m.on('click', e => {
+        L.DomEvent.stopPropagation(e);
+        var d = m.data, html = '<h3>'+d.name+'</h3>';
+        if(d.type==='interviews'){
+          html += '<iframe src="'+d.embed+'" allowfullscreen></iframe>'
+               + '<p><strong>Apodo:</strong> '+d.nickname+'</p>'
+               + '<p><strong>Edad:</strong> '+d.age+'</p>'
+               + '<p><strong>Profesión:</strong> '+d.profession+'</p>'
+               + '<p>'+d.desc+'</p>'
+               + '<p><strong>Fecha:</strong> '+d.date+'</p>';
+        } else if(d.type==='heritage'){
+          html += '<img src="'+d.photo+'" alt="'+d.name+'" style="width:100%;margin-bottom:12px;">'
+               + '<p><strong>Cronología:</strong> '+d.chronology+'</p>'
+               + '<p>'+d.desc+'</p>'
+               + '<p><a href="'+d.link+'" target="_blank">Más info</a></p>';
+        } else {
+          // Iniciativas culturales
+          if(d.embed) html += '<iframe src="'+d.embed+'" allowfullscreen></iframe>';
+          html += '<p><strong>Organizador:</strong> '+d.organizer+'</p>'
+               + '<p>'+d.desc+'</p>'
+               + '<p><a href="'+d.link+'" target="_blank">Ver más</a></p>';
+        }
+        content.innerHTML = html;
+        panel.classList.add('active');
+      });
+    }
+
+    // Crear marcadores
+    interviews.forEach(d => {
+      var m = L.marker(d.coords,{icon:icons.interviews}).addTo(map);
+      m.data=d; allMarkers.interviews.push(m); addEvents(m);
+    });
+    heritage.forEach(d => {
+      var m = L.marker(d.coords,{icon:icons.heritage}).addTo(map);
+      m.data=d; allMarkers.heritage.push(m); addEvents(m);
+    });
+    culture.forEach(d => {
+      var m = L.marker(d.coords,{icon:icons.culture}).addTo(map);
+      m.data=d; allMarkers.culture.push(m); addEvents(m);
+    });
+
+    document.querySelector('#info-panel .close-btn').addEventListener('click', closePanel);
+
+    function applyFilters(){
+      ['interviews','heritage','culture'].forEach(type => {
+        var show = document.querySelector('[data-type="'+type+'"]')
+                            .classList.contains('selected');
+        allMarkers[type].forEach(m => show ? m.addTo(map) : map.removeLayer(m));
+      });
+    }
+    document.querySelectorAll('.legend-item').forEach(el =>
+      el.addEventListener('click', () => {
+        el.classList.toggle('selected');
+        applyFilters();
+      })
+    );
+    applyFilters();
+
+    // Sobre el proyecto
+    document.getElementById('about-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      var html = '<h3>Sobre el proyecto</h3>'
+               + '<p>"Banco de Memoria de Aledo" preserva relatos orales de nuestros mayores, geolocalizándolos en el mapa para fomentar la memoria colectiva y el turismo cultural.</p>'
+               + '<p><span style="display:inline-block;width:12px;height:12px;background:green;margin-right:6px;"></span><strong>Entrevistas:</strong> Relatos en vídeo de vecinos que comparten tradiciones, oficios y vivencias.</p>'
+               + '<p><span style="display:inline-block;width:12px;height:12px;background:hotpink;margin-right:6px;"></span><strong>Patrimonio:</strong> Bienes históricos y arquitectónicos de Aledo, su cronología y restauración.</p>'
+               + '<p><span style="display:inline-block;width:12px;height:12px;background:blue;margin-right:6px;"></span><strong>Iniciativas culturales:</strong> Eventos y festivales locales que dinamizan la vida cultural del municipio.</p>';
+      content.innerHTML = html;
+      panel.classList.add('active');
+    });
+  </script>
+</body>
+</html>
